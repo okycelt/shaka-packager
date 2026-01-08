@@ -190,6 +190,17 @@ bool IsTextStream(const StreamDescriptor& stream) {
   return output_format == CONTAINER_WEBVTT || output_format == CONTAINER_TTML;
 }
 
+// Helper function to detect text streams from MPEG-TS that need coordinator mode
+bool IsMpegTsTextStream(const StreamDescriptor& stream) {
+  if (!IsTextStream(stream))
+    return false;
+
+  // Check if input file appears to be MPEG-TS
+  const std::string& input = stream.input;
+  return absl::EndsWith(absl::AsciiStrToLower(input), ".ts") ||
+         absl::EndsWith(absl::AsciiStrToLower(input), ".m2ts");
+}
+
 Status ValidateStreamDescriptor(bool dump_stream_info,
                                 const StreamDescriptor& stream) {
   if (stream.input.empty()) {
@@ -650,6 +661,8 @@ Status CreateAudioVideoJobs(
         new_input_file || previous_selector != stream.stream_selector;
     const bool is_text = IsTextStream(stream);
     const bool is_teletext = is_text && stream.cc_index >= 0;
+    // Include both teletext (cc_index >= 0) and DVB subtitle streams from MPEG-TS
+    const bool needs_coordinator = is_teletext || IsMpegTsTextStream(stream);
 
     previous_input = stream.input;
     previous_selector = stream.stream_selector;
@@ -669,12 +682,11 @@ Status CreateAudioVideoJobs(
       }
 
       std::vector<std::shared_ptr<MediaHandler>> handlers;
-      // Enable TextPadder for non-teletext text streams only.
-      // Teletext streams (cc_index >= 0) are used for live and
-      // must generate segments at the same time as video even
-      // if there is no text data, so a heart-beat mechanism
-      // is used instead of TextPadder at the next text event.
-      if (is_text && stream.cc_index < 0) {
+      // Enable TextPadder for text streams that don't use coordinator mode.
+      // MPEG-TS text streams (teletext and DVB subtitles) use a heartbeat
+      // mechanism and must generate segments at the same time as video even
+      // if there is no text data, so they don't use TextPadder.
+      if (is_text && !needs_coordinator) {
         handlers.emplace_back(std::make_shared<TextPadder>(
             packaging_params.default_text_zero_bias_ms));
       }
@@ -684,7 +696,7 @@ Status CreateAudioVideoJobs(
 
       // Track stream index for SegmentCoordinator
       size_t stream_index = stream_counters[stream.input]++;
-      if (is_teletext) {
+      if (needs_coordinator) {
         segment_coordinator->MarkAsTeletextStream(stream_index);
       }
 
@@ -739,8 +751,8 @@ Status CreateAudioVideoJobs(
 
     if (is_text &&
         (!stream.segment_template.empty() || output_format == CONTAINER_MOV)) {
-      // Enable coordinator mode for teletext streams to align with video/audio
-      bool use_coordinator = is_teletext;
+      // Enable coordinator mode for MPEG-TS text streams to align with video/audio
+      bool use_coordinator = needs_coordinator;
       handlers.emplace_back(
           CreateTextChunker(packaging_params.chunking_params, use_coordinator));
     }

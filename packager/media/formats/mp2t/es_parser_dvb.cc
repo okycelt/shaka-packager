@@ -144,22 +144,39 @@ bool EsParserDvb::ParseInternal(const uint8_t* data, size_t size, int64_t pts) {
     RCHECK(reader.SkipBytes(segment_length));
   }
 
-  // Emit TextHeartBeat when no content samples were produced
+  // Check for timeouts and emit TextHeartBeat when no content samples were produced
   if (!any_samples_emitted) {
     if (!pages_processed.empty()) {
-      // Send heartbeat for each processed page
+      // Send heartbeat for each processed page and check timeouts
       for (uint16_t page_id : pages_processed) {
+        CheckPageTimeout(page_id, pts);
         SendTextHeartBeat(page_id, pts);
       }
     } else {
-      // Send heartbeat for each known page from descriptor
+      // Send heartbeat for each known page from descriptor and check timeouts
       for (const auto& lang_pair : languages_) {
+        CheckPageTimeout(lang_pair.first, pts);
         SendTextHeartBeat(lang_pair.first, pts);
       }
     }
   }
 
   return temp == 0xff;
+}
+
+void EsParserDvb::CheckPageTimeout(uint16_t page_id, int64_t pts) {
+  // Check if this page's parser has any pending cues that timed out
+  auto it = parsers_.find(page_id);
+  if (it != parsers_.end()) {
+    std::vector<std::shared_ptr<TextSample>> timeout_samples;
+    if (it->second.CheckForTimeout(pts, &timeout_samples)) {
+      // Emit any timeout-generated samples
+      for (auto& sample : timeout_samples) {
+        sample->set_sub_stream_index(page_id);
+        emit_sample_cb_(sample);
+      }
+    }
+  }
 }
 
 void EsParserDvb::SendTextHeartBeat(uint16_t page_id, int64_t pts) {

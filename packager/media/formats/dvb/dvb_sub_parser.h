@@ -49,6 +49,9 @@ class DvbSubParser {
              std::vector<std::shared_ptr<TextSample>>* samples);
   bool Flush(std::vector<std::shared_ptr<TextSample>>* samples);
 
+  // Check if pending cue has timed out and emit kCueEnd if needed
+  bool CheckForTimeout(int64_t pts, std::vector<std::shared_ptr<TextSample>>* samples);
+
  private:
   friend class DvbSubParserTest;
 

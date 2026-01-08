@@ -52,10 +52,7 @@ bool DvbSubParser::Parse(DvbSubSegmentType segment_type,
                          size_t size,
                          std::vector<std::shared_ptr<TextSample>>* samples) {
   // Check if pending cue has timed out
-  if (has_pending_cue_ && pts >= pending_cue_timeout_) {
-    // Emit kCueEnd due to timeout
-    EmitTimeoutCueEnd(samples);
-  }
+  CheckForTimeout(pts, samples);
 
   switch (segment_type) {
     case DvbSubSegmentType::kPageComposition:
@@ -516,6 +513,14 @@ bool DvbSubParser::Parse8BitPixelData(bool is_top_fields,
   }
 
   return true;
+}
+
+bool DvbSubParser::CheckForTimeout(int64_t pts, std::vector<std::shared_ptr<TextSample>>* samples) {
+  if (has_pending_cue_ && pts >= pending_cue_timeout_) {
+    EmitTimeoutCueEnd(samples);
+    return true; // Timeout occurred
+  }
+  return false; // No timeout
 }
 
 void DvbSubParser::EmitTimeoutCueEnd(std::vector<std::shared_ptr<TextSample>>* samples) {

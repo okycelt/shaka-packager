@@ -13,6 +13,7 @@
 #include <absl/log/check.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <packager/media/formats/mp2t/mp2t_common.h>
 
 namespace shaka {
 namespace media {
@@ -25,6 +26,81 @@ constexpr const uint8_t kObjectId1 = 1;
 constexpr const uint8_t kObjectId2 = 2;
 
 constexpr const int64_t kNoPts = 0;
+
+// Shared test constants for all DVB parser tests
+constexpr const uint8_t kDisplayDefinitionSegment[] = {
+  0x02, 0xcf,  // dds_version_number(4) | display_window_flag(1) |
+               //   reserved(3) | display_width(16)
+  0x02, 0x3f,  // display_height(16)
+};
+
+constexpr const uint8_t kRegionCompositionSegment[] = {
+  // clang-format off
+  kRegionId,  // region_id
+  0x00,       // region_version_number(4) | region_fill_flag(1) | reserved(3)
+  0x00, 0x30, // region_width
+  0x00, 0x20, // region_height
+  0x33,       // region_level_of_compatibility(3) | region_depth(3) |
+              //   reserved(2)
+  kClutId,    // CLUT_id
+  0xff,       // region_8-bit_pixel_code
+  0x00,       // region_4-bit_pixel_code(4) | region_2-bit_pixel_code(2) |
+              //   reserved(2)
+
+  // First object
+  0x00, kObjectId1,  // object_id
+  0x00, 0x07,        // object_type(2) | object_provider_flag(2) |
+                     //   object_horizontal_position(12)
+  0x00, 0x08,        // reserved(4) | object_vertical_position(12)
+
+  // Second object
+  0x00, kObjectId2,  // object_id
+  0x00, 0x09,        // object_type(2) | object_provider_flag(2) |
+                     //   object_horizontal_position(12)
+  0x00, 0x0c,        // reserved(4) | object_vertical_position(12)
+};
+
+constexpr const uint8_t kClutDefinitionSegment[] = {
+  // clang-format off
+  kClutId,  // CLUT_id
+  0x00,     // CLUT_version_number(4) | reserved(4)
+
+  // First color
+  0x00,  // CLUT_entry_id
+  0x81,  // flags (2-bit,full-range)
+  70, 141, 117, 0,
+  0x00,  // CLUT_entry_id
+  0x41,  // flags (4-bit,full-range)
+  70, 141, 117, 0,
+  0x00,  // CLUT_entry_id
+  0x21,  // flags (8-bit,full-range)
+  70, 141, 117, 0,
+
+  // Second color
+  0x01,  // CLUT_entry_id
+  0x81,  // flags (2-bit,full-range)
+  33, 134, 122, 0,
+  0x01,  // CLUT_entry_id
+  0x41,  // flags (4-bit,full-range)
+  33, 134, 122, 0,
+  0x01,  // CLUT_entry_id
+  0x21,  // flags (8-bit,full-range)
+  33, 134, 122, 0,
+
+  // Third color
+  0x02,  // CLUT_entry_id
+  0x81,  // flags (2-bit,full-range)
+  100, 128, 127, 0,
+  0x02,  // CLUT_entry_id
+  0x41,  // flags (4-bit,full-range)
+  100, 128, 127, 0,
+  0x02,  // CLUT_entry_id
+  0x21,  // flags (8-bit,full-range)
+  100, 128, 127, 0,
+  // clang-format on
+};
+
+constexpr const uint8_t kEndOfDisplaySegment[] = {0x00};
 
 /// @param object_id The Object ID.
 /// @param pairs A vector of data_type plus data body.  Each pair should be a
@@ -300,6 +376,171 @@ TEST_F(DvbSubParserTest, BasicFlow) {
   EXPECT_EQ(samples[1]->settings().line->value, 0x1e);
   EXPECT_EQ(samples[1]->settings().width->value, 4);
   EXPECT_EQ(samples[1]->settings().height->value, 3);
+}
+
+// Test new kCueStart/kCueEnd functionality
+class DvbSubParserHeartbeatTest : public ::testing::Test {
+ protected:
+  static constexpr int64_t kTestPts1 = 5000;  // 5 seconds
+  static constexpr int64_t kTestPts2 = 10000; // 10 seconds
+  static constexpr uint8_t kTestTimeout = 30; // 30 seconds
+  static constexpr uint8_t kTestPage[8] = {
+    kTestTimeout, // timeout
+    0x00,         // page_version_number (4 bits) + page_state (2 bits) + reserved (2 bits)
+    0x10,         // page_state = 0x1 (acquisition point)
+    0x00, 0x00,   // region references...
+    0x00, 0x00, 0x00
+  };
+};
+
+TEST_F(DvbSubParserHeartbeatTest, EndOfDisplayEmitsCueStart) {
+  DvbSubParser parser;
+  std::vector<std::shared_ptr<TextSample>> samples;
+
+  // Set up minimal objects so GetSamplesAsCueStart can create samples
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kDisplayDefinition, kNoPts,
+                           kDisplayDefinitionSegment, sizeof(kDisplayDefinitionSegment), &samples));
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kPageComposition, kTestPts1,
+                           kTestPage, sizeof(kTestPage), &samples));
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kRegionComposition, kTestPts1,
+                           kRegionCompositionSegment, sizeof(kRegionCompositionSegment), &samples));
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kClutDefinition, kTestPts1,
+                           kClutDefinitionSegment, sizeof(kClutDefinitionSegment), &samples));
+
+  // Add some object data
+  auto object_data = GenerateObjectData(kObjectId1,
+    {{0x10, {"01", "10", "11", "00", "00", "01"}}});
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kObjectData, kTestPts1,
+                           object_data.data(), object_data.size(), &samples));
+
+  // Clear any existing samples from setup
+  samples.clear();
+
+  // Now EndOfDisplay should emit kCueStart
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kEndOfDisplay, kTestPts1,
+                           kEndOfDisplaySegment, sizeof(kEndOfDisplaySegment), &samples));
+
+  // Should have emitted kCueStart sample
+  ASSERT_EQ(samples.size(), 1u);
+  EXPECT_EQ(samples[0]->role(), TextSampleRole::kCueStart);
+  EXPECT_EQ(samples[0]->start_time(), kTestPts1);
+  EXPECT_EQ(samples[0]->EndTime(), kTestPts1 + 30 * kMpeg2Timescale); // 30s placeholder
+}
+
+TEST_F(DvbSubParserHeartbeatTest, PageCompositionEmitsCueEnd) {
+  DvbSubParser parser;
+  std::vector<std::shared_ptr<TextSample>> samples;
+
+  // Set up minimal content and trigger kCueStart
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kDisplayDefinition, kNoPts,
+                           kDisplayDefinitionSegment, sizeof(kDisplayDefinitionSegment), &samples));
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kPageComposition, kTestPts1,
+                           kTestPage, sizeof(kTestPage), &samples));
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kRegionComposition, kTestPts1,
+                           kRegionCompositionSegment, sizeof(kRegionCompositionSegment), &samples));
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kClutDefinition, kTestPts1,
+                           kClutDefinitionSegment, sizeof(kClutDefinitionSegment), &samples));
+
+  auto object_data = GenerateObjectData(kObjectId1,
+    {{0x10, {"01", "10", "11", "00", "00", "01"}}});
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kObjectData, kTestPts1,
+                           object_data.data(), object_data.size(), &samples));
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kEndOfDisplay, kTestPts1,
+                           kEndOfDisplaySegment, sizeof(kEndOfDisplaySegment), &samples));
+
+  // Should have kCueStart
+  ASSERT_EQ(samples.size(), 1u);
+  EXPECT_EQ(samples[0]->role(), TextSampleRole::kCueStart);
+  samples.clear();
+
+  // Now page composition with acquisition point should emit kCueEnd
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kPageComposition, kTestPts2,
+                           kTestPage, sizeof(kTestPage), &samples));
+
+  ASSERT_EQ(samples.size(), 1u);
+  EXPECT_EQ(samples[0]->role(), TextSampleRole::kCueEnd);
+  EXPECT_EQ(samples[0]->start_time(), kTestPts2);
+  EXPECT_EQ(samples[0]->EndTime(), kTestPts2);
+}
+
+TEST_F(DvbSubParserHeartbeatTest, FlushEmitsCueEndWithTimeout) {
+  DvbSubParser parser;
+  std::vector<std::shared_ptr<TextSample>> samples;
+
+  // Set up content and trigger kCueStart
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kDisplayDefinition, kNoPts,
+                           kDisplayDefinitionSegment, sizeof(kDisplayDefinitionSegment), &samples));
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kPageComposition, kTestPts1,
+                           kTestPage, sizeof(kTestPage), &samples));
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kRegionComposition, kTestPts1,
+                           kRegionCompositionSegment, sizeof(kRegionCompositionSegment), &samples));
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kClutDefinition, kTestPts1,
+                           kClutDefinitionSegment, sizeof(kClutDefinitionSegment), &samples));
+
+  auto object_data = GenerateObjectData(kObjectId1,
+    {{0x10, {"01", "10", "11", "00", "00", "01"}}});
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kObjectData, kTestPts1,
+                           object_data.data(), object_data.size(), &samples));
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kEndOfDisplay, kTestPts1,
+                           kEndOfDisplaySegment, sizeof(kEndOfDisplaySegment), &samples));
+
+  // Should have kCueStart
+  ASSERT_EQ(samples.size(), 1u);
+  samples.clear();
+
+  // Flush should emit kCueEnd with timeout-based end time
+  ASSERT_TRUE(parser.Flush(&samples));
+
+  ASSERT_EQ(samples.size(), 1u);
+  EXPECT_EQ(samples[0]->role(), TextSampleRole::kCueEnd);
+  int64_t expected_end = kTestPts1 + kTestTimeout * kMpeg2Timescale;
+  EXPECT_EQ(samples[0]->start_time(), expected_end);
+  EXPECT_EQ(samples[0]->EndTime(), expected_end);
+}
+
+TEST_F(DvbSubParserHeartbeatTest, SparseStreamGeneratesCueStartEnd) {
+  // Test the complete sparse stream scenario:
+  // 1. Content appears -> kCueStart
+  // 2. Long gap with no content
+  // 3. New content appears -> kCueEnd + new kCueStart
+  DvbSubParser parser;
+  std::vector<std::shared_ptr<TextSample>> samples;
+
+  // First subtitle at 5s
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kDisplayDefinition, kNoPts,
+                           kDisplayDefinitionSegment, sizeof(kDisplayDefinitionSegment), &samples));
+
+  uint8_t page_normal[8] = {
+    kTestTimeout, 0x00, 0x00, // page_state = 0x0 (normal case)
+    0x00, 0x00, 0x00, 0x00, 0x00
+  };
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kPageComposition, kTestPts1,
+                           page_normal, sizeof(page_normal), &samples));
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kRegionComposition, kTestPts1,
+                           kRegionCompositionSegment, sizeof(kRegionCompositionSegment), &samples));
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kClutDefinition, kTestPts1,
+                           kClutDefinitionSegment, sizeof(kClutDefinitionSegment), &samples));
+
+  auto object_data = GenerateObjectData(kObjectId1,
+    {{0x10, {"01", "10", "11", "00", "00", "01"}}});
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kObjectData, kTestPts1,
+                           object_data.data(), object_data.size(), &samples));
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kEndOfDisplay, kTestPts1,
+                           kEndOfDisplaySegment, sizeof(kEndOfDisplaySegment), &samples));
+
+  ASSERT_EQ(samples.size(), 1u);
+  EXPECT_EQ(samples[0]->role(), TextSampleRole::kCueStart);
+  samples.clear();
+
+  // Long gap - no content for 300 seconds, then new subtitle clears old one
+  int64_t gap_pts = kTestPts1 + 300 * kMpeg2Timescale;
+  ASSERT_TRUE(parser.Parse(DvbSubSegmentType::kPageComposition, gap_pts,
+                           kTestPage, sizeof(kTestPage), &samples)); // page_state 0x1 clears
+
+  // Should emit kCueEnd for previous content
+  ASSERT_EQ(samples.size(), 1u);
+  EXPECT_EQ(samples[0]->role(), TextSampleRole::kCueEnd);
+  EXPECT_EQ(samples[0]->start_time(), gap_pts);
 }
 
 }  // namespace media

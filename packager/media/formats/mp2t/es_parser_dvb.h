@@ -51,6 +51,11 @@ class EsParserDvb : public EsParser {
   // A map of page_id to language.
   std::unordered_map<uint16_t, std::string> languages_;
   bool sent_info_ = false;
+
+  // State tracking for TextHeartBeat emission
+  int64_t last_pts_ = -1;  // Track timing progression like teletext
+
+  void SendTextHeartBeat(uint16_t page_id, int64_t pts);
 };
 
 }  // namespace mp2t

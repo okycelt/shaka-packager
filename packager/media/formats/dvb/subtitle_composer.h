@@ -47,6 +47,11 @@ class SubtitleComposer {
   bool GetSamples(int64_t start,
                   int64_t end,
                   std::vector<std::shared_ptr<TextSample>>* samples) const;
+
+  // Creates kCueStart samples with placeholder duration (30s like teletext)
+  bool GetSamplesAsCueStart(int64_t pts,
+                            std::vector<std::shared_ptr<TextSample>>* samples) const;
+
   void ClearObjects();
 
  private:

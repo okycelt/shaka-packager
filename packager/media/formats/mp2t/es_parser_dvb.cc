@@ -6,6 +6,8 @@
 
 #include <packager/media/formats/mp2t/es_parser_dvb.h>
 
+#include <set>
+
 #include <packager/media/base/bit_reader.h>
 #include <packager/media/base/text_stream_info.h>
 #include <packager/media/base/timestamp.h>
@@ -111,6 +113,9 @@ bool EsParserDvb::ParseInternal(const uint8_t* data, size_t size, int64_t pts) {
   RCHECK(data_identifier == 0x20);
   RCHECK(subtitle_stream_id == 0);
 
+  bool any_samples_emitted = false;
+  std::set<uint16_t> pages_processed;
+
   int temp;
   while (reader.ReadBits(8, &temp) && temp == 0xf) {
     DvbSubSegmentType segment_type;
@@ -121,18 +126,57 @@ bool EsParserDvb::ParseInternal(const uint8_t* data, size_t size, int64_t pts) {
     RCHECK(reader.ReadBits(16, &segment_length));
     RCHECK(reader.bits_available() > segment_length * 8);
 
+    pages_processed.insert(page_id);
+
     const uint8_t* payload = data + (size - reader.bits_available() / 8);
     std::vector<std::shared_ptr<TextSample>> samples;
     RCHECK(parsers_[page_id].Parse(segment_type, pts, payload, segment_length,
                                    &samples));
-    for (auto sample : samples) {
-      sample->set_sub_stream_index(page_id);
-      emit_sample_cb_(sample);
+
+    if (!samples.empty()) {
+      any_samples_emitted = true;
+      for (auto sample : samples) {
+        sample->set_sub_stream_index(page_id);
+        emit_sample_cb_(sample);
+      }
     }
 
     RCHECK(reader.SkipBytes(segment_length));
   }
+
+  // Emit TextHeartBeat when no content samples were produced
+  if (!any_samples_emitted) {
+    if (!pages_processed.empty()) {
+      // Send heartbeat for each processed page
+      for (uint16_t page_id : pages_processed) {
+        SendTextHeartBeat(page_id, pts);
+      }
+    } else {
+      // Send heartbeat for each known page from descriptor
+      for (const auto& lang_pair : languages_) {
+        SendTextHeartBeat(lang_pair.first, pts);
+      }
+    }
+  }
+
   return temp == 0xff;
+}
+
+void EsParserDvb::SendTextHeartBeat(uint16_t page_id, int64_t pts) {
+  if (last_pts_ == -1) {
+    last_pts_ = pts;
+    return;
+  }
+  if (pts == last_pts_) {
+    return;
+  }
+
+  auto heartbeat = std::make_shared<TextSample>(
+      "", pts, pts, TextSettings{}, TextFragment{},
+      TextSampleRole::kTextHeartBeat);
+  heartbeat->set_sub_stream_index(page_id);
+  emit_sample_cb_(heartbeat);
+  last_pts_ = pts;
 }
 
 }  // namespace mp2t

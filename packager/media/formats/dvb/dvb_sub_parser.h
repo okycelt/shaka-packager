@@ -79,6 +79,10 @@ class DvbSubParser {
   SubtitleComposer composer_;
   int64_t last_pts_;
   uint8_t timeout_;
+
+  // State tracking for kCueStart/kCueEnd pattern
+  bool has_pending_cue_ = false;  // True after kCueStart emitted
+  int64_t pending_cue_pts_ = 0;   // PTS when kCueStart was emitted
 };
 
 }  // namespace media

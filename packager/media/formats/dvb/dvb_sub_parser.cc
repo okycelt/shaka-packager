@@ -62,10 +62,21 @@ bool DvbSubParser::Parse(DvbSubSegmentType segment_type,
       return ParseObjectData(pts, payload, size);
     case DvbSubSegmentType::kDisplayDefinition:
       return ParseDisplayDefinition(payload, size);
-    case DvbSubSegmentType::kEndOfDisplay:
-      // This signals all the current objects are available.  But we need to
-      // know the end time, so we do nothing for now.
+    case DvbSubSegmentType::kEndOfDisplay: {
+      // Content is complete - emit kCueStart immediately if we haven't already
+      if (!has_pending_cue_) {
+        std::vector<std::shared_ptr<TextSample>> cue_starts;
+        RCHECK(composer_.GetSamplesAsCueStart(pts, &cue_starts));
+        if (!cue_starts.empty()) {
+          for (auto& sample : cue_starts) {
+            samples->push_back(std::move(sample));
+          }
+          has_pending_cue_ = true;
+          pending_cue_pts_ = pts;
+        }
+      }
       return true;
+    }
     default:
       LOG(WARNING) << "Unknown DVB-sub segment_type=0x" << std::hex
                    << static_cast<uint32_t>(segment_type);
@@ -74,8 +85,15 @@ bool DvbSubParser::Parse(DvbSubSegmentType segment_type,
 }
 
 bool DvbSubParser::Flush(std::vector<std::shared_ptr<TextSample>>* samples) {
-  RCHECK(composer_.GetSamples(last_pts_, last_pts_ + timeout_ * kMpeg2Timescale,
-                              samples));
+  if (has_pending_cue_) {
+    // Stream ended - emit kCueEnd with timeout-based end time
+    int64_t end_time = last_pts_ + timeout_ * kMpeg2Timescale;
+    auto cue_end = std::make_shared<TextSample>(
+        "", end_time, end_time, TextSettings{}, TextFragment{},
+        TextSampleRole::kCueEnd);
+    samples->push_back(std::move(cue_end));
+    has_pending_cue_ = false;
+  }
   composer_.ClearObjects();
   return true;
 }
@@ -104,7 +122,15 @@ bool DvbSubParser::ParsePageComposition(
   if (page_state == 0x1 || page_state == 0x2) {
     // If this is a "acquisition point" or a "mode change", then this is a new
     // page and we should clear the old data.
-    RCHECK(composer_.GetSamples(last_pts_, pts, samples));
+    // First emit kCueEnd for any pending cue, then clear
+    if (has_pending_cue_) {
+      auto cue_end = std::make_shared<TextSample>(
+          "", pts, pts, TextSettings{}, TextFragment{},
+          TextSampleRole::kCueEnd);
+      samples->push_back(std::move(cue_end));
+      has_pending_cue_ = false;
+    }
+    // Don't call GetSamples here anymore - content is already emitted as kCueStart
     composer_.ClearObjects();
     last_pts_ = pts;
   }

@@ -13,6 +13,7 @@
 #include <png.h>
 
 #include <packager/macros/logging.h>
+#include <packager/media/formats/mp2t/mp2t_common.h>
 
 namespace shaka {
 namespace media {
@@ -242,6 +243,52 @@ bool SubtitleComposer::GetSamples(
 
     samples->emplace_back(
         std::make_shared<TextSample>("", start, end, settings, body));
+  }
+
+  return true;
+}
+
+bool SubtitleComposer::GetSamplesAsCueStart(
+    int64_t pts,
+    std::vector<std::shared_ptr<TextSample>>* samples) const {
+  // Similar to GetSamples but uses kCueStart role with placeholder duration
+  const int64_t placeholder_duration = 30 * kMpeg2Timescale;  // 30s like teletext
+
+  for (const auto& pair : objects_) {
+    auto it = images_.find(pair.first);
+    if (it == images_.end()) {
+      LOG(WARNING) << "DVB-sub object " << pair.first
+                   << " doesn't include object data";
+      continue;
+    }
+
+    uint16_t width, height;
+    std::vector<uint8_t> image_data;
+    if (!GetImageData(&it->second, &image_data, &width, &height))
+      return false;
+    if (image_data.empty()) {
+      VLOG(1) << "Skipping transparent object";
+      continue;
+    }
+    TextFragment body({}, image_data);
+    DCHECK_LE(width, display_width_);
+    DCHECK_LE(height, display_height_);
+
+    TextSettings settings;
+    settings.position.emplace(
+        (pair.second.x + pair.second.region->x) * 100.0f / display_width_,
+        TextUnitType::kPercent);
+    settings.line.emplace(
+        (pair.second.y + pair.second.region->y) * 100.0f / display_height_,
+        TextUnitType::kPercent);
+    settings.width.emplace(width * 100.0f / display_width_,
+                           TextUnitType::kPercent);
+    settings.height.emplace(height * 100.0f / display_height_,
+                            TextUnitType::kPercent);
+
+    samples->emplace_back(
+        std::make_shared<TextSample>("", pts, pts + placeholder_duration,
+                                     settings, body, TextSampleRole::kCueStart));
   }
 
   return true;

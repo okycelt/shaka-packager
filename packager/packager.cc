@@ -195,10 +195,17 @@ bool IsMpegTsTextStream(const StreamDescriptor& stream) {
   if (!IsTextStream(stream))
     return false;
 
-  // Check if input file appears to be MPEG-TS
+  // Check if input appears to be MPEG-TS
   const std::string& input = stream.input;
-  return absl::EndsWith(absl::AsciiStrToLower(input), ".ts") ||
-         absl::EndsWith(absl::AsciiStrToLower(input), ".m2ts");
+  std::string lower_input = absl::AsciiStrToLower(input);
+
+  // UDP streams are typically MPEG-TS for broadcast scenarios
+  if (absl::StartsWith(lower_input, "udp://"))
+    return true;
+
+  // File extension fallback for backward compatibility
+  return absl::EndsWith(lower_input, ".ts") ||
+         absl::EndsWith(lower_input, ".m2ts");
 }
 
 Status ValidateStreamDescriptor(bool dump_stream_info,

@@ -31,6 +31,9 @@ enum class DvbSubSegmentType : uint16_t {
   kEndOfDisplay = 0x80,
 };
 
+// Default timeout for DVB subtitle cues: 3 seconds at 90kHz timescale.
+constexpr int64_t kDvbSubtitleTimeoutTicks = 270000;
+
 class DvbSubParser {
  public:
   DvbSubParser();
@@ -76,6 +79,9 @@ class DvbSubParser {
                           BitReader* reader,
                           DvbImageBuilder* image);
 
+  // Helper method to emit kCueEnd when timeout expires
+  void EmitTimeoutCueEnd(std::vector<std::shared_ptr<TextSample>>* samples);
+
   SubtitleComposer composer_;
   int64_t last_pts_;
   uint8_t timeout_;
@@ -83,6 +89,7 @@ class DvbSubParser {
   // State tracking for kCueStart/kCueEnd pattern
   bool has_pending_cue_ = false;  // True after kCueStart emitted
   int64_t pending_cue_pts_ = 0;   // PTS when kCueStart was emitted
+  int64_t pending_cue_timeout_ = 0;  // PTS when pending cue should timeout
 };
 
 }  // namespace media

@@ -51,6 +51,12 @@ bool DvbSubParser::Parse(DvbSubSegmentType segment_type,
                          const uint8_t* payload,
                          size_t size,
                          std::vector<std::shared_ptr<TextSample>>* samples) {
+  // Check if pending cue has timed out
+  if (has_pending_cue_ && pts >= pending_cue_timeout_) {
+    // Emit kCueEnd due to timeout
+    EmitTimeoutCueEnd(samples);
+  }
+
   switch (segment_type) {
     case DvbSubSegmentType::kPageComposition:
       return ParsePageComposition(pts, payload, size, samples);
@@ -73,6 +79,7 @@ bool DvbSubParser::Parse(DvbSubSegmentType segment_type,
           }
           has_pending_cue_ = true;
           pending_cue_pts_ = pts;
+          pending_cue_timeout_ = pts + kDvbSubtitleTimeoutTicks;
         }
       }
       return true;
@@ -93,6 +100,8 @@ bool DvbSubParser::Flush(std::vector<std::shared_ptr<TextSample>>* samples) {
         TextSampleRole::kCueEnd);
     samples->push_back(std::move(cue_end));
     has_pending_cue_ = false;
+    pending_cue_pts_ = 0;
+    pending_cue_timeout_ = 0;
   }
   composer_.ClearObjects();
   return true;
@@ -129,6 +138,8 @@ bool DvbSubParser::ParsePageComposition(
           TextSampleRole::kCueEnd);
       samples->push_back(std::move(cue_end));
       has_pending_cue_ = false;
+      pending_cue_pts_ = 0;
+      pending_cue_timeout_ = 0;
     }
     // Don't call GetSamples here anymore - content is already emitted as kCueStart
     composer_.ClearObjects();
@@ -505,6 +516,24 @@ bool DvbSubParser::Parse8BitPixelData(bool is_top_fields,
   }
 
   return true;
+}
+
+void DvbSubParser::EmitTimeoutCueEnd(std::vector<std::shared_ptr<TextSample>>* samples) {
+  if (!has_pending_cue_) return;
+
+  // Calculate timeout duration
+  int64_t duration = kDvbSubtitleTimeoutTicks;
+
+  // Create kCueEnd sample with timeout duration
+  auto cue_end = std::make_shared<TextSample>(
+      "", pending_cue_pts_, pending_cue_pts_ + duration, TextSettings{},
+      TextFragment{}, TextSampleRole::kCueEnd);
+  samples->push_back(cue_end);
+
+  // Reset pending cue state
+  has_pending_cue_ = false;
+  pending_cue_pts_ = 0;
+  pending_cue_timeout_ = 0;
 }
 
 }  // namespace media

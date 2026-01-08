@@ -13,6 +13,8 @@
 
 #include <packager/media/formats/mp2t/mp2t_common.h>
 
+#include <functional>
+
 namespace shaka {
 namespace media {
 
@@ -51,9 +53,6 @@ bool DvbSubParser::Parse(DvbSubSegmentType segment_type,
                          const uint8_t* payload,
                          size_t size,
                          std::vector<std::shared_ptr<TextSample>>* samples) {
-  // Check if pending cue has timed out
-  CheckForTimeout(pts, samples);
-
   switch (segment_type) {
     case DvbSubSegmentType::kPageComposition:
       return ParsePageComposition(pts, payload, size, samples);
@@ -67,7 +66,7 @@ bool DvbSubParser::Parse(DvbSubSegmentType segment_type,
       return ParseDisplayDefinition(payload, size);
     case DvbSubSegmentType::kEndOfDisplay: {
       // Content is complete - emit kCueStart immediately if we haven't already
-      if (!has_pending_cue_) {
+      if (!has_pending_cue_ && !content_timed_out_) {
         std::vector<std::shared_ptr<TextSample>> cue_starts;
         RCHECK(composer_.GetSamplesAsCueStart(pts, &cue_starts));
         if (!cue_starts.empty()) {
@@ -140,6 +139,7 @@ bool DvbSubParser::ParsePageComposition(
     }
     // Don't call GetSamples here anymore - content is already emitted as kCueStart
     composer_.ClearObjects();
+    content_timed_out_ = false;  // Clear timeout flag since new content arrived
     last_pts_ = pts;
   }
 
@@ -539,6 +539,7 @@ void DvbSubParser::EmitTimeoutCueEnd(std::vector<std::shared_ptr<TextSample>>* s
   has_pending_cue_ = false;
   pending_cue_pts_ = 0;
   pending_cue_timeout_ = 0;
+  content_timed_out_ = true;  // Mark that content was ended by timeout
 }
 
 }  // namespace media

@@ -93,6 +93,7 @@ class DvbSubParser {
   bool has_pending_cue_ = false;  // True after kCueStart emitted
   int64_t pending_cue_pts_ = 0;   // PTS when kCueStart was emitted
   int64_t pending_cue_timeout_ = 0;  // PTS when pending cue should timeout
+  bool content_timed_out_ = false;  // True if last content was ended by timeout
 };
 
 }  // namespace media

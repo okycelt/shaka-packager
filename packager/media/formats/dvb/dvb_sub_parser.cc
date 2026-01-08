@@ -70,12 +70,20 @@ bool DvbSubParser::Parse(DvbSubSegmentType segment_type,
         std::vector<std::shared_ptr<TextSample>> cue_starts;
         RCHECK(composer_.GetSamplesAsCueStart(pts, &cue_starts));
         if (!cue_starts.empty()) {
+          LOG(INFO) << "DVB: Emitting " << cue_starts.size() << " subtitle(s) at pts=" << pts
+                    << " (timeout in 3s)";
           for (auto& sample : cue_starts) {
             samples->push_back(std::move(sample));
           }
           has_pending_cue_ = true;
           pending_cue_pts_ = pts;
           pending_cue_timeout_ = pts + kDvbSubtitleTimeoutTicks;
+        }
+      } else {
+        if (has_pending_cue_) {
+          LOG(INFO) << "DVB: Skipping emission - subtitle already active at pts=" << pts;
+        } else if (content_timed_out_) {
+          LOG(INFO) << "DVB: Blocking re-emission - content recently timed out at pts=" << pts;
         }
       }
       return true;
@@ -127,6 +135,8 @@ bool DvbSubParser::ParsePageComposition(
   if (page_state == 0x1 || page_state == 0x2) {
     // If this is a "acquisition point" or a "mode change", then this is a new
     // page and we should clear the old data.
+    LOG(INFO) << "DVB: New content acquisition point - clearing old subtitle state";
+
     // First emit kCueEnd for any pending cue, then clear
     if (has_pending_cue_) {
       auto cue_end = std::make_shared<TextSample>(
@@ -140,6 +150,7 @@ bool DvbSubParser::ParsePageComposition(
     // Don't call GetSamples here anymore - content is already emitted as kCueStart
     composer_.ClearObjects();
     content_timed_out_ = false;  // Clear timeout flag since new content arrived
+    LOG(INFO) << "DVB: Ready for new subtitle content";
     last_pts_ = pts;
   }
 
@@ -525,6 +536,8 @@ bool DvbSubParser::CheckForTimeout(int64_t pts, std::vector<std::shared_ptr<Text
 
 void DvbSubParser::EmitTimeoutCueEnd(std::vector<std::shared_ptr<TextSample>>* samples) {
   if (!has_pending_cue_) return;
+
+  LOG(INFO) << "DVB: Subtitle timeout after 3 seconds - removing subtitle at pts=" << pending_cue_pts_;
 
   // Calculate timeout duration
   int64_t duration = kDvbSubtitleTimeoutTicks;

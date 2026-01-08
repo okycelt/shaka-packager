@@ -174,6 +174,7 @@ bool EsParserDvb::CheckPageTimeout(uint16_t page_id, int64_t pts) {
   if (it != parsers_.end()) {
     std::vector<std::shared_ptr<TextSample>> timeout_samples;
     if (it->second.CheckForTimeout(pts, &timeout_samples)) {
+      LOG(INFO) << "DVB: Heartbeat triggered timeout for page " << page_id << " at pts=" << pts;
       // Emit any timeout-generated samples
       for (auto& sample : timeout_samples) {
         sample->set_sub_stream_index(page_id);

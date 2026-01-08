@@ -149,14 +149,18 @@ bool EsParserDvb::ParseInternal(const uint8_t* data, size_t size, int64_t pts) {
     if (!pages_processed.empty()) {
       // Send heartbeat for each processed page and check timeouts
       for (uint16_t page_id : pages_processed) {
-        CheckPageTimeout(page_id, pts);
-        SendTextHeartBeat(page_id, pts);
+        bool timeout_occurred = CheckPageTimeout(page_id, pts);
+        if (!timeout_occurred) {
+          SendTextHeartBeat(page_id, pts);
+        }
       }
     } else {
       // Send heartbeat for each known page from descriptor and check timeouts
       for (const auto& lang_pair : languages_) {
-        CheckPageTimeout(lang_pair.first, pts);
-        SendTextHeartBeat(lang_pair.first, pts);
+        bool timeout_occurred = CheckPageTimeout(lang_pair.first, pts);
+        if (!timeout_occurred) {
+          SendTextHeartBeat(lang_pair.first, pts);
+        }
       }
     }
   }
@@ -164,7 +168,7 @@ bool EsParserDvb::ParseInternal(const uint8_t* data, size_t size, int64_t pts) {
   return temp == 0xff;
 }
 
-void EsParserDvb::CheckPageTimeout(uint16_t page_id, int64_t pts) {
+bool EsParserDvb::CheckPageTimeout(uint16_t page_id, int64_t pts) {
   // Check if this page's parser has any pending cues that timed out
   auto it = parsers_.find(page_id);
   if (it != parsers_.end()) {
@@ -175,8 +179,10 @@ void EsParserDvb::CheckPageTimeout(uint16_t page_id, int64_t pts) {
         sample->set_sub_stream_index(page_id);
         emit_sample_cb_(sample);
       }
+      return true;  // Timeout occurred
     }
   }
+  return false;  // No timeout
 }
 
 void EsParserDvb::SendTextHeartBeat(uint16_t page_id, int64_t pts) {

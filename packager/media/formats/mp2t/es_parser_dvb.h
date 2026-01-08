@@ -56,7 +56,7 @@ class EsParserDvb : public EsParser {
   int64_t last_pts_ = -1;  // Track timing progression like teletext
 
   void SendTextHeartBeat(uint16_t page_id, int64_t pts);
-  void CheckPageTimeout(uint16_t page_id, int64_t pts);
+  bool CheckPageTimeout(uint16_t page_id, int64_t pts);
 };
 
 }  // namespace mp2t

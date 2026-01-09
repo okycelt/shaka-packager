@@ -54,6 +54,9 @@ class SubtitleComposer {
 
   void ClearObjects();
 
+  // Debug function to save subtitle bitmaps to PNG files
+  void SaveDebugBitmap(int64_t pts, const char* event_type) const;
+
  private:
   struct RegionInfo {
     DvbImageColorSpace* color_space = nullptr;

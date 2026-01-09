@@ -72,6 +72,8 @@ bool DvbSubParser::Parse(DvbSubSegmentType segment_type,
         if (!cue_starts.empty()) {
           LOG(INFO) << "DVB: Emitting " << cue_starts.size() << " subtitle(s) at pts=" << pts
                     << " (timeout in 3s)";
+          // Save debug bitmap
+          composer_.SaveDebugBitmap(pts, "emit");
           for (auto& sample : cue_starts) {
             samples->push_back(std::move(sample));
           }
@@ -139,6 +141,8 @@ bool DvbSubParser::ParsePageComposition(
 
     // First emit kCueEnd for any pending cue, then clear
     if (has_pending_cue_) {
+      // Save debug bitmap before acquisition point removal
+      composer_.SaveDebugBitmap(pending_cue_pts_, "acquisition");
       auto cue_end = std::make_shared<TextSample>(
           "", pts, pts, TextSettings{}, TextFragment{},
           TextSampleRole::kCueEnd);
@@ -538,6 +542,9 @@ void DvbSubParser::EmitTimeoutCueEnd(std::vector<std::shared_ptr<TextSample>>* s
   if (!has_pending_cue_) return;
 
   LOG(INFO) << "DVB: Subtitle timeout after 3 seconds - removing subtitle at pts=" << pending_cue_pts_;
+
+  // Save debug bitmap before timeout removal
+  composer_.SaveDebugBitmap(pending_cue_pts_, "timeout");
 
   // Calculate timeout duration
   int64_t duration = kDvbSubtitleTimeoutTicks;

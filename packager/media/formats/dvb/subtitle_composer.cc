@@ -6,14 +6,7 @@
 
 #include <packager/media/formats/dvb/subtitle_composer.h>
 
-#include <cstdio>
 #include <cstring>
-#include <string>
-#ifdef _WIN32
-#include <direct.h>
-#else
-#include <sys/stat.h>
-#endif
 
 #include <absl/log/check.h>
 #include <absl/log/log.h>
@@ -305,47 +298,6 @@ void SubtitleComposer::ClearObjects() {
   regions_.clear();
   objects_.clear();
   images_.clear();
-}
-
-void SubtitleComposer::SaveDebugBitmap(int64_t pts, const char* event_type) const {
-  // Create debug directory if it doesn't exist
-  const char* debug_dir = "dvb_debug_bitmaps";
-
-  // Try to create directory (ignore error if it already exists)
-  #ifdef _WIN32
-    _mkdir(debug_dir);
-  #else
-    mkdir(debug_dir, 0755);
-  #endif
-
-  for (const auto& pair : objects_) {
-    auto it = images_.find(pair.first);
-    if (it == images_.end()) {
-      continue;
-    }
-
-    uint16_t width, height;
-    std::vector<uint8_t> png_data;
-    if (!GetImageData(&it->second, &png_data, &width, &height)) {
-      continue;
-    }
-    if (png_data.empty()) {
-      continue;  // Skip transparent objects
-    }
-
-    // Save PNG data to file in debug directory
-    std::string obj_filename = std::string(debug_dir) + "/dvb_sub_pts_" + std::to_string(pts) + "_obj" +
-                               std::to_string(pair.first) + "_" + event_type + ".png";
-
-    FILE* file = fopen(obj_filename.c_str(), "wb");
-    if (file) {
-      fwrite(png_data.data(), 1, png_data.size(), file);
-      fclose(file);
-      LOG(INFO) << "DVB: Saved bitmap " << obj_filename << " (" << width << "x" << height << ")";
-    } else {
-      LOG(WARNING) << "DVB: Failed to save bitmap " << obj_filename;
-    }
-  }
 }
 
 }  // namespace media

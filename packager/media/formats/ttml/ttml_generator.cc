@@ -111,10 +111,16 @@ bool TtmlGenerator::Dump(std::string* result) const {
   }
   size_t image_count = 0;
   std::unordered_set<std::string> fragmentStyles;
+  std::vector<xml::XmlNode> dynamic_regions;
   xml::XmlNode div("div");
   for (const auto& sample : samples_) {
     RCHECK(
-        AddSampleToXml(sample, &div, &metadata, fragmentStyles, &image_count));
+        AddSampleToXml(sample, &div, &metadata, fragmentStyles, &image_count, &dynamic_regions));
+  }
+
+  // Add dynamic regions to layout
+  for (auto& region : dynamic_regions) {
+    RCHECK(layout.AddChild(std::move(region)));
   }
   if (image_count > 0) {
     RCHECK(root.SetStringAttribute(
@@ -138,8 +144,11 @@ bool TtmlGenerator::AddSampleToXml(
     xml::XmlNode* body,
     xml::XmlNode* metadata,
     std::unordered_set<std::string>& fragmentStyles,
-    size_t* image_count) const {
-  xml::XmlNode p("p");
+    size_t* image_count,
+    std::vector<xml::XmlNode>* dynamic_regions) const {
+  // Use <div> for bitmap content (SMPTE-TT compliance), <p> for text content
+  const bool hasBitmap = HasBitmapContent(sample.body());
+  xml::XmlNode p(hasBitmap ? "div" : "p");
   if (!isEbuTTTD()) {
     RCHECK(p.SetStringAttribute("xml:space", "preserve"));
   }
@@ -178,7 +187,7 @@ bool TtmlGenerator::AddSampleToXml(
     RCHECK(region.SetStringAttribute("tts:origin", origin));
     RCHECK(region.SetStringAttribute("tts:extent", extent));
     RCHECK(p.SetStringAttribute("region", id));
-    RCHECK(body->AddChild(std::move(region)));
+    dynamic_regions->push_back(std::move(region));
   }
 
   if (settings.writing_direction != WritingDirection::kHorizontal) {
@@ -283,6 +292,20 @@ bool TtmlGenerator::ConvertFragmentToXml(
   if (useSpan)
     RCHECK(parent->AddChild(std::move(span)));
   return true;
+}
+
+bool TtmlGenerator::HasBitmapContent(const TextFragment& fragment) const {
+  // Check if this fragment has image data
+  if (!fragment.image.empty()) {
+    return true;
+  }
+  // Recursively check sub-fragments
+  for (const auto& sub_fragment : fragment.sub_fragments) {
+    if (HasBitmapContent(sub_fragment)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 std::vector<std::string> TtmlGenerator::usedRegions() const {

@@ -12,6 +12,7 @@
 #include <map>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 #include <packager/media/base/text_sample.h>
 #include <packager/media/base/text_stream_info.h>
@@ -41,7 +42,8 @@ class TtmlGenerator {
                       xml::XmlNode* body,
                       xml::XmlNode* metadata,
                       std::unordered_set<std::string>& fragmentStyles,
-                      size_t* image_count) const;
+                      size_t* image_count,
+                      std::vector<xml::XmlNode>* dynamic_regions) const;
   bool ConvertFragmentToXml(const TextFragment& fragment,
                             xml::XmlNode* parent,
                             xml::XmlNode* metadata,
@@ -53,6 +55,9 @@ class TtmlGenerator {
   bool addRegions(xml::XmlNode& layout) const;
   std::vector<std::string> usedRegions() const;
   bool isEbuTTTD() const;
+
+  // Helper function to check if a TextFragment contains bitmap data
+  bool HasBitmapContent(const TextFragment& fragment) const;
 
   std::list<TextSample> samples_;
   std::map<std::string, TextRegion> regions_;
